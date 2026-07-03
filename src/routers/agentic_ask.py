@@ -1,6 +1,13 @@
 from fastapi import APIRouter, HTTPException
 from src.dependencies import AgenticRAGDep, LangfuseDep
-from src.schemas.api.ask import AgenticAskResponse, AskRequest, FeedbackRequest, FeedbackResponse
+from src.schemas.api.ask import (
+    AgenticAskResponse,
+    AskRequest,
+    FeedbackRequest,
+    FeedbackResponse,
+    SkepticReviewRequest,
+    SkepticReviewResponse,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["agentic-rag"])
 
@@ -39,6 +46,7 @@ async def ask_agentic(
     try:
         result = await agentic_rag.ask(
             query=request.query,
+            model=request.model,
         )
 
         return AgenticAskResponse(
@@ -56,6 +64,49 @@ async def ask_agentic(
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing question: {str(e)}")
+
+
+@router.post("/skeptic-review", response_model=SkepticReviewResponse)
+async def skeptic_review(
+    request: SkepticReviewRequest,
+    agentic_rag: AgenticRAGDep,
+) -> SkepticReviewResponse:
+    """Create a skeptical review of an AI/CS research paper claim.
+
+    The endpoint implements the AI Research Paper Skeptic Agent workflow:
+    retrieve relevant paper evidence, ask for a critical review, apply an
+    unsupported-claim guardrail, and return a structured checklist for users.
+    """
+    try:
+        result = await agentic_rag.ask_skeptic_review(
+            query=request.query,
+            focus_area=request.focus_area,
+            model=request.model,
+        )
+
+        return SkepticReviewResponse(
+            query=result["query"],
+            answer=result["answer"],
+            sources=result.get("sources", []),
+            chunks_used=request.top_k,
+            search_mode="hybrid" if request.use_hybrid else "bm25",
+            reasoning_steps=result.get("reasoning_steps", []),
+            retrieval_attempts=result.get("retrieval_attempts", 0),
+            trace_id=result.get("trace_id"),
+            main_claim=result["main_claim"],
+            method=result["method"],
+            evidence=result["evidence"],
+            limitations=result["limitations"],
+            unsupported_claims=result["unsupported_claims"],
+            questions_to_ask=result["questions_to_ask"],
+            risk_score=result["risk_score"],
+            routing_decision=result["routing_decision"],
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating skeptical review: {str(e)}")
 
 
 @router.post("/feedback", response_model=FeedbackResponse)

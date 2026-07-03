@@ -115,3 +115,21 @@ Instructions:
 - Do NOT make up information or cite papers not in the retrieved context
 
 Answer:"""
+
+
+# Skeptical review prompt for the AI Research Paper Skeptic Agent
+SKEPTIC_REVIEW_PROMPT = """Create a skeptical review of the research claim or paper requested by the user.
+
+User request: {question}
+Focus area: {focus_area}
+
+Use retrieved paper evidence only. Produce these sections:
+1. Main claim
+2. Method
+3. Evidence
+4. Limitations
+5. Unsupported or weakly supported claims
+6. Questions to ask the authors or reader
+7. Risk score from 0-100 and recommended routing decision
+
+Be critical but fair. If evidence is missing, say so instead of inventing support."""

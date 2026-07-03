@@ -1,9 +1,9 @@
 """Tests for AgenticRAGService using LangGraph 2.0 Runtime pattern."""
 
-import pytest
 from unittest.mock import AsyncMock, Mock
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.services.agents.agentic_rag import AgenticRAGService
 from src.services.agents.config import GraphConfig
 from src.services.agents.models import GuardrailScoring
@@ -113,3 +113,35 @@ class TestAgenticRAGErrorHandling:
 
         with pytest.raises(Exception, match="Graph execution failed"):
             await test_service.ask(query="Test query")
+
+class TestAgenticRAGSkepticReview:
+    """Tests for skeptical review helpers."""
+
+    @pytest.mark.asyncio
+    async def test_ask_skeptic_review_structured_fields(self, test_service):
+        """Test skeptical review returns structured checklist fields."""
+        test_service.ask = AsyncMock(return_value={
+            "query": "internal prompt",
+            "answer": "Skeptical review text",
+            "sources": [{"title": "Attention Is All You Need", "arxiv_id": "1706.03762"}],
+            "reasoning_steps": ["Retrieved documents"],
+            "retrieval_attempts": 1,
+        })
+
+        result = await test_service.ask_skeptic_review(
+            query="Review transformer attention claims",
+            focus_area="evidence",
+        )
+
+        assert result["query"] == "Review transformer attention claims"
+        assert result["main_claim"] == "Review target: Review transformer attention claims"
+        assert result["evidence"]
+        assert result["limitations"]
+        assert result["unsupported_claims"]
+        assert result["questions_to_ask"]
+        assert 0 <= result["risk_score"] <= 100
+        assert "guardrail" in result["reasoning_steps"][-1]
+
+    def test_skeptic_risk_score_without_sources(self, test_service):
+        """Test missing retrieval evidence creates high risk."""
+        assert test_service._calculate_skeptic_risk_score([], 1) == 90
