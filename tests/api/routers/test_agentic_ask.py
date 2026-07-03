@@ -1,10 +1,10 @@
-import pytest
-from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, Mock
 
+import pytest
+from fastapi.testclient import TestClient
+from src import dependencies
 from src.main import app
 from src.services.agents.agentic_rag import AgenticRAGService
-from src import dependencies
 
 
 @pytest.fixture
@@ -230,3 +230,53 @@ class TestAgenticAskEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["search_mode"] == "bm25"
+
+class TestSkepticReviewEndpoint:
+    """Tests for POST /api/v1/skeptic-review endpoint."""
+
+    def test_skeptic_review_success(self, client, mock_agentic_rag_service):
+        """Test successful skeptical review response."""
+        mock_agentic_rag_service.ask_skeptic_review = AsyncMock(return_value={
+            "query": "Review transformer scaling claims",
+            "answer": "A skeptical review of the claim.",
+            "sources": ["https://arxiv.org/pdf/1706.03762.pdf"],
+            "reasoning_steps": ["Retrieved documents", "Applied unsupported-claim guardrail"],
+            "retrieval_attempts": 1,
+            "trace_id": None,
+            "main_claim": "Scaling improves model quality.",
+            "method": "RAG retrieval and skeptical prompt workflow.",
+            "evidence": ["Retrieved source supports part of the claim."],
+            "limitations": ["Chunk-level review only."],
+            "unsupported_claims": ["Generalization needs verification."],
+            "questions_to_ask": ["Were baselines appropriate?"],
+            "risk_score": 45,
+            "routing_decision": "Inspect cited papers before relying on the claim.",
+        })
+
+        response = client.post(
+            "/api/v1/skeptic-review",
+            json={
+                "query": "Review transformer scaling claims",
+                "focus_area": "limitations",
+                "top_k": 4,
+                "use_hybrid": True,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["main_claim"] == "Scaling improves model quality."
+        assert data["risk_score"] == 45
+        assert data["chunks_used"] == 4
+        assert data["search_mode"] == "hybrid"
+        assert data["unsupported_claims"]
+        mock_agentic_rag_service.ask_skeptic_review.assert_called_once()
+        assert mock_agentic_rag_service.ask_skeptic_review.call_args.kwargs["focus_area"] == "limitations"
+
+    def test_skeptic_review_empty_query(self, client, mock_agentic_rag_service):
+        """Test skeptical review validation for an empty query."""
+        mock_agentic_rag_service.ask_skeptic_review = AsyncMock(side_effect=ValueError("Query cannot be empty"))
+
+        response = client.post("/api/v1/skeptic-review", json={"query": ""})
+
+        assert response.status_code == 422

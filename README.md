@@ -70,6 +70,29 @@ By the end of this course, you'll have your own AI research assistant and the de
 - **Mobile Access**: Telegram bot for conversational AI on any device
 - **Transparency**: Full reasoning step tracking for debugging and trust
 
+
+### AI Research Paper Skeptic Agent
+
+This project now includes a skeptical-review workflow inspired by the AAI HIMSHIKHAR 2026 Project 07 brief. Use it when you want the system to question a paper or research claim instead of only summarizing it.
+
+**Endpoint:** `POST /api/v1/skeptic-review`
+
+```bash
+curl -X POST http://localhost:8000/api/v1/skeptic-review \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Review the evidence behind transformer scaling claims",
+    "focus_area": "limitations and unsupported claims",
+    "top_k": 5,
+    "use_hybrid": true,
+    "model": "llama3.2:1b"
+  }'
+```
+
+The response includes the main claim, method, evidence bullets, limitations, unsupported-claim guardrails, questions to ask, a 0-100 risk score, routing decision, sources, and reasoning steps.
+
+You can also use this from the Gradio app at `http://localhost:7861` by opening the **🕵️ Skeptic Review** tab.
+
 ---
 
 ## 🚀 Quick Start

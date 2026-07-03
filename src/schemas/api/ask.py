@@ -71,6 +71,62 @@ class AgenticAskResponse(AskResponse):
         }
 
 
+class SkepticReviewRequest(AskRequest):
+    """Request model for skeptical research-paper review."""
+
+    focus_area: Optional[str] = Field(
+        None,
+        description="Optional lens for the critique, such as methodology, evidence, or limitations",
+        max_length=200,
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "Review the evidence behind transformer scaling laws",
+                "focus_area": "limitations and unsupported claims",
+                "top_k": 5,
+                "use_hybrid": True,
+                "model": "llama3.2:1b",
+            }
+        }
+
+
+class SkepticReviewResponse(AgenticAskResponse):
+    """Structured response for AI Research Paper Skeptic Agent output."""
+
+    main_claim: str = Field(..., description="Concise statement of the paper/topic claim being evaluated")
+    method: str = Field(..., description="Methods or experimental setup identified from retrieved evidence")
+    evidence: List[str] = Field(..., description="Evidence points grounded in retrieved papers")
+    limitations: List[str] = Field(..., description="Limitations, caveats, and threats to validity")
+    unsupported_claims: List[str] = Field(..., description="Claims that need stronger evidence or were not supported by retrieval")
+    questions_to_ask: List[str] = Field(..., description="Follow-up questions a reader should ask before trusting the claim")
+    risk_score: int = Field(..., description="Skepticism risk score from 0 (low) to 100 (high)", ge=0, le=100)
+    routing_decision: str = Field(..., description="Recommended next action for the user")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "Review a paper about transformer scaling laws",
+                "answer": "Structured skeptical review...",
+                "sources": ["https://arxiv.org/pdf/1706.03762.pdf"],
+                "chunks_used": 5,
+                "search_mode": "hybrid",
+                "reasoning_steps": ["Validated query scope", "Retrieved documents", "Applied unsupported-claim guardrail"],
+                "retrieval_attempts": 1,
+                "trace_id": None,
+                "main_claim": "The paper argues that scaling improves model performance.",
+                "method": "Retrieved evidence mentions empirical model comparisons.",
+                "evidence": ["Relevant retrieved sources were used as evidence."],
+                "limitations": ["Review depends on retrieved chunks, not a full peer review."],
+                "unsupported_claims": ["Claims not present in retrieved evidence require verification."],
+                "questions_to_ask": ["Are evaluation datasets representative?"],
+                "risk_score": 45,
+                "routing_decision": "Proceed with caution and inspect cited papers.",
+            }
+        }
+
+
 class FeedbackRequest(BaseModel):
     """Request model for user feedback on RAG answers."""
 

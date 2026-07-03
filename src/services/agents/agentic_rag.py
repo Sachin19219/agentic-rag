@@ -6,7 +6,6 @@ from langchain_core.messages import HumanMessage
 from langfuse.langchain import CallbackHandler
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
-
 from src.services.embeddings.jina_client import JinaEmbeddingsClient
 from src.services.langfuse.client import LangfuseTracer
 from src.services.ollama.client import OllamaClient
@@ -23,6 +22,7 @@ from .nodes import (
     ainvoke_rewrite_query_step,
     continue_after_guardrail,
 )
+from .prompts import SKEPTIC_REVIEW_PROMPT
 from .state import AgentState
 from .tools import create_retriever_tool
 
@@ -225,6 +225,106 @@ class AgenticRAGService:
             logger.error(f"Error in Agentic RAG execution: {str(e)}")
             logger.exception("Full traceback:")
             raise
+
+
+    async def ask_skeptic_review(
+        self,
+        query: str,
+        focus_area: Optional[str] = None,
+        user_id: str = "api_user",
+        model: Optional[str] = None,
+    ) -> dict:
+        """Create a skeptical research-paper review with claim-evidence guardrails.
+
+        The review reuses the agentic retrieval workflow, but asks the LLM to
+        critique the paper/topic instead of only answering the question. The
+        returned payload includes structured fields required by the AI Research
+        Paper Skeptic Agent brief: main claim, method, evidence, limitations,
+        unsupported claims, questions, risk score, and a routing decision.
+        """
+        if not query or len(query.strip()) == 0:
+            logger.error("Empty skeptic-review query received")
+            raise ValueError("Query cannot be empty")
+
+        review_query = SKEPTIC_REVIEW_PROMPT.format(
+            question=query.strip(),
+            focus_area=(focus_area or "general skeptical review").strip(),
+        )
+        result = await self.ask(query=review_query, user_id=user_id, model=model)
+        sources = result.get("sources", [])
+        risk_score = self._calculate_skeptic_risk_score(sources, result.get("retrieval_attempts", 0))
+
+        result.update({
+            "query": query,
+            "main_claim": f"Review target: {query.strip()}",
+            "method": "Agentic PDF/RAG retrieval over indexed arXiv paper chunks, followed by a skeptical review prompt.",
+            "evidence": self._summarize_evidence_points(sources),
+            "limitations": self._default_skeptic_limitations(sources),
+            "unsupported_claims": self._unsupported_claim_guardrail(sources),
+            "questions_to_ask": self._default_skeptic_questions(focus_area),
+            "risk_score": risk_score,
+            "routing_decision": self._route_skeptic_review(risk_score),
+        })
+        result.setdefault("reasoning_steps", []).append("Applied unsupported-claim guardrail and skeptical review checklist")
+        return result
+
+    def _calculate_skeptic_risk_score(self, sources: List[dict], retrieval_attempts: int) -> int:
+        """Estimate risk from retrieval coverage for a skeptical review."""
+        if not sources:
+            return 90
+        coverage_penalty = max(0, 5 - len(sources)) * 10
+        retry_penalty = max(0, retrieval_attempts - 1) * 10
+        return min(100, 25 + coverage_penalty + retry_penalty)
+
+    def _summarize_evidence_points(self, sources: List[dict]) -> List[str]:
+        """Create source-grounded evidence bullets for the structured response."""
+        if not sources:
+            return ["No retrieved source strongly supported the requested claim."]
+        points = []
+        for source in sources[:5]:
+            title = source.get("title") if isinstance(source, dict) else None
+            arxiv_id = source.get("arxiv_id") if isinstance(source, dict) else None
+            label = title or arxiv_id or "Retrieved paper"
+            points.append(f"Retrieved evidence from {label} should be checked against the review text.")
+        return points
+
+    def _default_skeptic_limitations(self, sources: List[dict]) -> List[str]:
+        """Return conservative limitations for the review."""
+        limitations = [
+            "This is an AI-assisted screening review, not a substitute for expert peer review.",
+            "The critique is limited to retrieved chunks and may miss evidence outside the index.",
+        ]
+        if not sources:
+            limitations.append("No supporting sources were retrieved, so the claim should be treated as high risk.")
+        return limitations
+
+    def _unsupported_claim_guardrail(self, sources: List[dict]) -> List[str]:
+        """Flag claims that require human verification when evidence coverage is weak."""
+        if not sources:
+            return ["Any substantive claim in the answer is unsupported until source papers are supplied or retrieved."]
+        return [
+            "Claims not explicitly tied to the listed sources require manual verification in the full paper.",
+            "Performance, novelty, and generalization claims should be checked against baselines and evaluation data.",
+        ]
+
+    def _default_skeptic_questions(self, focus_area: Optional[str]) -> List[str]:
+        """Generate follow-up questions for readers and decision-makers."""
+        questions = [
+            "What exact claim is supported by the cited evidence, and what is merely implied?",
+            "Are the datasets, baselines, and evaluation metrics appropriate for the conclusion?",
+            "Do the authors discuss failure cases, assumptions, and threats to validity?",
+        ]
+        if focus_area:
+            questions.insert(0, f"For the focus area '{focus_area}', what evidence would change the conclusion?")
+        return questions
+
+    def _route_skeptic_review(self, risk_score: int) -> str:
+        """Recommend a next action based on skepticism risk."""
+        if risk_score >= 75:
+            return "High risk: gather more evidence or ask a human expert before relying on this claim."
+        if risk_score >= 45:
+            return "Medium risk: inspect cited papers and verify unsupported claims before use."
+        return "Lower risk: proceed, but keep limitations and cited evidence attached."
 
     async def _run_workflow(self, query: str, model_to_use: str, user_id: str, trace) -> dict:
         """Execute the workflow with the given trace context."""
